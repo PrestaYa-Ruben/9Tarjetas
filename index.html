@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PrestaYa - Elige tu Carta</title>
+    <!-- Versión 3.0 (PWA · modo claro) -->
+    <meta name="theme-color" content="#f8fafc">
+    <meta name="description" content="Destapa cartas y gana boletas adicionales para la rifa de PrestaYa.">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" type="image/png" href="icons/favicon-64.png">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Elige tu Carta">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        body { -webkit-tap-highlight-color: transparent; }
+        body { background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%); }
+        .glass {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+        }
+
+        /* ===== Cartas 3D (animaciones más lentas) ===== */
+        .card-container { perspective: 1000px; }
+        .card-inner {
+            position: relative; width: 100%; height: 100%; text-align: center;
+            transition: transform 0.75s cubic-bezier(0.45, 0.05, 0.25, 1);
+            transform-style: preserve-3d;
+        }
+        .card-container.flipped .card-inner { transform: rotateY(180deg); }
+        .card-container.no-anim .card-inner { transition: none; }
+        .card-front, .card-back {
+            position: absolute; width: 100%; height: 100%;
+            -webkit-backface-visibility: hidden; backface-visibility: hidden;
+            border-radius: 1rem; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        .card-front {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: 2px solid #047857; color: #ffffff;
+            box-shadow: 0 6px 14px rgba(5, 150, 105, 0.28);
+        }
+        .card-back {
+            background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+            border: 2px solid #cbd5e1; color: #1e293b;
+            transform: rotateY(180deg);
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+        }
+        .card-back.win {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border-color: #10b981; color: #065f46;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.30);
+        }
+        .card-container.ghost { opacity: .6; pointer-events: none; transition: opacity .8s ease; }
+        .card-container.ghost .card-back { filter: grayscale(.5); box-shadow: none; }
+        .card-container.revealed .card-back.win { animation: glow 1.6s ease-in-out infinite alternate; }
+        @keyframes glow {
+            from { box-shadow: 0 0 6px rgba(16,185,129,.30); }
+            to   { box-shadow: 0 0 22px rgba(16,185,129,.65); }
+        }
+
+        /* Reparto inicial de cartas */
+        .deal { animation: dealIn 0.7s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d, 0ms); }
+        @keyframes dealIn {
+            from { opacity: 0; transform: translateY(-50px) scale(.5) rotate(-12deg); }
+            to   { opacity: 1; transform: none; }
+        }
+
+        /* Suspenso antes de voltear */
+        .card-container.picking { animation: pick 0.6s ease-in-out; z-index: 5; }
+        @keyframes pick {
+            0%   { transform: scale(1) rotate(0); }
+            15%  { transform: scale(1.12) rotate(-4deg); }
+            30%  { transform: scale(1.12) rotate(4deg); }
+            45%  { transform: scale(1.12) rotate(-3deg); }
+            60%  { transform: scale(1.12) rotate(3deg); }
+            80%  { transform: scale(1.14) rotate(0); }
+            100% { transform: scale(1) rotate(0); }
+        }
+
+        /* Modales */
+        .modal-wrap { transition: opacity .45s ease; }
+        .modal-wrap.hidden-modal { opacity: 0; pointer-events: none; }
+        .modal-wrap.show .modal-box { animation: pop .6s cubic-bezier(.2,1.35,.4,1) both; }
+        @keyframes pop {
+            from { opacity: 0; transform: scale(.7) translateY(20px); }
+            to   { opacity: 1; transform: none; }
+        }
+        .modal-wrap.show #modal-icon { animation: bounceIcon 1.2s ease .3s both; }
+        @keyframes bounceIcon {
+            0% { transform: scale(0); } 50% { transform: scale(1.35); }
+            70% { transform: scale(.9); } 100% { transform: scale(1); }
+        }
+
+        .prize-row { animation: slideIn .6s ease both; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+
+        #send-result-btn { box-shadow: 0 10px 30px rgba(16,185,129,.35); }
+        #send-result-btn.attention { animation: attention 1.6s ease-in-out infinite; }
+        @keyframes attention {
+            0%, 100% { transform: scale(1);    box-shadow: 0 10px 30px rgba(16,185,129,.35); }
+            50%      { transform: scale(1.04); box-shadow: 0 12px 42px rgba(16,185,129,.75); }
+        }
+        .shake { animation: shake 0.35s; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col justify-between p-4 selection:bg-emerald-500 selection:text-white">
+
+    <!-- Botón de sonido -->
+    <button id="mute-btn" onclick="toggleMute()" class="fixed top-3 right-3 z-40 w-9 h-9 rounded-full bg-white border border-slate-200 shadow-sm text-base flex items-center justify-center">🔊</button>
+
+    <!-- Botón instalar app (solo administrador) -->
+    <button id="install-btn" onclick="installApp()" title="Descargar app" aria-label="Descargar app"
+        class="hidden fixed top-3 left-3 z-40 h-9 pl-2.5 pr-3 rounded-full bg-emerald-600 text-white shadow-md shadow-emerald-600/30 flex items-center gap-1.5 text-xs font-bold">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M6 11l6 6 6-6"/><path d="M5 20h14"/></svg>
+        <span>App</span>
+    </button>
+
+    <!-- Header -->
+    <header class="w-full max-w-md mx-auto text-center py-4">
+        <!-- 5 toques sobre el logo = acceso administrador -->
+        <h1 id="brand-logo" class="text-3xl font-black tracking-tight text-slate-900 flex items-center justify-center gap-1 select-none cursor-default">
+            PRESTA<span class="text-emerald-500">YA</span>
+        </h1>
+
+        <!-- Pestañas: solo visibles para el administrador -->
+        <div id="admin-tabs" class="hidden inline-flex p-1 bg-white border border-slate-200 rounded-full my-3">
+            <button id="tab-carton" onclick="showTab('carton')" class="px-5 py-1.5 rounded-full text-xs font-bold">Cartón</button>
+            <button id="tab-gen" onclick="showTab('gen')" class="px-5 py-1.5 rounded-full text-xs font-bold">Generador</button>
+            <button onclick="exitAdmin()" class="px-3 py-1.5 rounded-full text-xs text-red-500 font-semibold">Salir</button>
+        </div>
+
+        <p id="client-greeting" class="hidden text-sm font-bold text-emerald-600 mt-2"></p>
+
+    </header>
+
+    <!-- Aviso centrado entre el logo y las tarjetas -->
+    <div id="hint-wrap" class="flex-1 flex items-center justify-center py-3">
+        <p id="hint-text" class="text-xl font-extrabold text-emerald-600 text-center animate-pulse px-4 leading-snug max-w-sm">
+            ¡Elige con cuidado, solo tienes 2 oportunidades!
+        </p>
+    </div>
+
+    <!-- ================= VISTA: CARTÓN (juego) ================= -->
+    <main id="view-carton" class="w-full max-w-xs mx-auto flex flex-col items-center gap-4">
+
+        <div id="invalid-link" class="hidden glass rounded-2xl p-6 text-center">
+            <div class="text-4xl mb-2">⚠️</div>
+            <h3 class="font-bold text-slate-900">Enlace no válido</h3>
+            <p class="text-xs text-slate-500 mt-1">Este enlace está dañado o fue modificado. Pide uno nuevo a PrestaYa.</p>
+        </div>
+
+        <div id="game-area" class="w-full flex flex-col items-center gap-4">
+            <div class="glass px-4 py-2 rounded-xl flex items-center justify-between w-full shadow-lg">
+                <span class="text-xs text-slate-600 font-medium">Oportunidades restantes:</span>
+                <span id="attempts-badge" class="bg-emerald-600 text-white font-extrabold px-3 py-0.5 rounded-full text-xs">2 / 2</span>
+            </div>
+
+            <div id="grid-container" class="grid grid-cols-3 gap-3 w-full aspect-square"></div>
+
+
+            <!-- Premios acumulados -->
+            <div id="prizes-panel" class="hidden glass w-full rounded-2xl p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs font-bold text-slate-900">🏆 Premios acumulados</span>
+                    <span id="prizes-count" class="text-[10px] bg-emerald-100 text-emerald-600 font-bold px-2 py-0.5 rounded-full">0</span>
+                </div>
+                <div id="prizes-list" class="flex flex-col gap-1.5"></div>
+            </div>
+
+            <!-- Enviar resultado -->
+            <button id="send-result-btn" onclick="sendResult()" class="hidden w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white py-5 px-4 rounded-2xl flex flex-col items-center justify-center gap-1 border-2 border-emerald-300/40">
+                <span class="text-lg font-black leading-tight">📲 Enviar resultado por WhatsApp</span>
+                <span class="text-[11px] font-semibold text-emerald-50/90">Toca aquí para reportar tu resultado a PrestaYa</span>
+            </button>
+
+            <!-- Herramientas admin dentro del cartón -->
+            <button id="admin-reset-btn" onclick="resetCurrentGame()" class="hidden text-[11px] text-amber-600 underline">
+                🔄 Reiniciar intentos de este juego
+            </button>
+        </div>
+    </main>
+
+    <!-- ================= VISTA: GENERADOR (solo admin) ================= -->
+    <section id="view-gen" class="hidden w-full max-w-sm mx-auto my-auto flex flex-col gap-4">
+        <div class="glass rounded-2xl p-5">
+            <h2 class="text-base font-bold text-slate-900 mb-1">🔗 Generar enlace para cliente</h2>
+            <p class="text-[11px] text-slate-500 mb-4">Cada enlace es único: el cliente solo verá el juego con su nombre y sus oportunidades.</p>
+
+            <label class="text-[11px] text-slate-500">Nombre del cliente *</label>
+            <input id="gen-name" type="text" maxlength="40" class="w-full mt-1 mb-3 bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Ej: Carlos Pérez">
+
+            <label class="text-[11px] text-slate-500">Celular del cliente (opcional)</label>
+            <input id="gen-phone" type="tel" inputmode="numeric" maxlength="15" class="w-full mt-1 mb-3 bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Ej: 3001234567">
+
+            <label class="text-[11px] text-slate-500">Oportunidades</label>
+            <div class="flex items-center gap-3 mt-1 mb-4">
+                <button onclick="changeGenAttempts(-1)" class="w-10 h-10 rounded-xl bg-slate-200 text-lg font-bold">−</button>
+                <span id="gen-attempts" class="flex-1 text-center text-xl font-black text-emerald-600">2</span>
+                <button onclick="changeGenAttempts(1)" class="w-10 h-10 rounded-xl bg-slate-200 text-lg font-bold">+</button>
+            </div>
+
+            <button onclick="generateLink()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-sm">Generar enlace</button>
+
+            <div id="gen-result" class="hidden mt-4">
+                <div class="bg-white border border-slate-300 rounded-xl p-3">
+                    <span class="text-[10px] text-slate-500 uppercase tracking-wider">Enlace · <span id="gen-id"></span></span>
+                    <p id="gen-link" class="text-[11px] font-mono text-emerald-700 break-all mt-1"></p>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-3">
+                    <button onclick="copyLink()" id="copy-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-900 py-2.5 rounded-xl text-xs font-bold">📋 Copiar</button>
+                    <button onclick="shareToClient()" class="bg-emerald-700 hover:bg-emerald-600 text-white py-2.5 rounded-xl text-xs font-bold">💬 Enviar al cliente</button>
+                </div>
+                <button id="native-share-btn" onclick="nativeShare()" class="hidden w-full mt-2 bg-slate-200 hover:bg-slate-300 text-slate-900 py-2.5 rounded-xl text-xs font-bold">📤 Compartir…</button>
+            </div>
+        </div>
+
+        <div class="glass rounded-2xl p-5">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-bold text-slate-900">Enlaces generados</h3>
+                <button onclick="clearHistory()" class="text-[10px] text-slate-500 underline">Borrar lista</button>
+            </div>
+            <div id="gen-history" class="flex flex-col gap-2 text-xs"></div>
+        </div>
+    </section>
+
+    <!-- Modal de resultado -->
+    <div id="result-modal" class="modal-wrap hidden-modal fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="modal-box bg-white max-w-xs w-full p-6 rounded-3xl border border-slate-300 text-center shadow-2xl">
+            <div id="modal-icon" class="text-5xl mb-2">🎉</div>
+            <h3 id="modal-title" class="text-lg font-bold text-slate-900">¡FELICIDADES!</h3>
+            <p id="modal-message" class="text-xs text-slate-600 mt-1">Has ganado un beneficio.</p>
+
+            <div id="code-box" class="bg-slate-50 border border-slate-200 rounded-xl p-2.5 my-3">
+                <span class="text-[10px] text-slate-500 block uppercase tracking-wider">Código de canje:</span>
+                <span id="promo-code" class="text-base font-mono font-bold text-emerald-600">PY-0000</span>
+            </div>
+
+            <div class="flex flex-col gap-2 mt-3">
+                <button id="modal-send-btn" onclick="sendResult()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold py-4 px-4 rounded-2xl text-base shadow-lg shadow-emerald-600/30">
+                    📲 Enviar resultado por WhatsApp
+                </button>
+                <button id="modal-continue-btn" onclick="closeModal()" class="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white py-3.5 rounded-2xl text-base font-extrabold shadow-lg shadow-emerald-500/30">
+                    Continuar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal instrucciones de instalación (solo administrador) -->
+    <div id="install-modal" class="modal-wrap hidden-modal fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="modal-box bg-white max-w-xs w-full p-6 rounded-3xl border border-slate-300 text-center shadow-2xl">
+            <div class="text-3xl mb-2">📲</div>
+            <h3 class="text-base font-bold text-slate-900">Instalar la app</h3>
+            <p id="install-help" class="text-xs text-slate-600 mt-2 leading-relaxed"></p>
+            <button onclick="closeModalEl('install-modal')" class="w-full mt-4 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white py-3 rounded-2xl text-sm font-extrabold">Entendido</button>
+        </div>
+    </div>
+
+    <!-- Modal PIN -->
+    <div id="pin-modal" class="modal-wrap hidden-modal fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div id="pin-card" class="modal-box bg-white max-w-xs w-full p-6 rounded-3xl border border-slate-300 text-center shadow-2xl">
+            <div class="text-3xl mb-2">🔒</div>
+            <h3 class="text-base font-bold text-slate-900">Acceso administrador</h3>
+            <p class="text-xs text-slate-500 mt-1">Ingresa el PIN</p>
+            <input id="pin-input" type="password" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                class="w-full mt-4 bg-white border border-slate-300 rounded-xl py-2.5 text-center text-lg font-mono tracking-widest text-slate-900 focus:outline-none focus:border-emerald-500"
+                placeholder="••••••••">
+            <p id="pin-error" class="text-[11px] text-red-500 mt-2 hidden">PIN incorrecto</p>
+            <div class="flex gap-2 mt-4">
+                <button onclick="closePinModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-600 py-2 rounded-xl text-xs font-medium">Cancelar</button>
+                <button onclick="checkPin()" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold">Entrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="flex-1 min-h-[16px]"></div>
+
+    <footer class="text-center py-2 text-[10px] text-slate-500">
+        PrestaYa © 2026 • Todos los derechos reservados · v3.0
+    </footer>
+
+    <script>
+        // ================= CONFIGURACIÓN =================
+        const ADMIN_PIN   = "prestaya2026";            // PIN de administrador
+        const ADMIN_PHONE = "573162685282";    // WhatsApp que recibe los resultados
+        const LINK_SECRET = "PrestaYa-2026-cartas"; // Firma de enlaces (cámbiala si quieres)
+        const MAX_ATTEMPTS = 5;
+        // =================================================
+
+        const basePrizes = [
+            { title: "1 Boleta más",           icon: "🎟️", win: true, type: "boleta", qty: 1 },
+            { title: "1 Boleta más",           icon: "🎟️", win: true, type: "boleta", qty: 1 },
+            { title: "No ganaste",             icon: "",   win: false },
+            { title: "No ganaste",             icon: "",   win: false },
+            { title: "2 Boletas más",          icon: "🔥", win: true, type: "boleta", qty: 2 },
+            { title: "No ganaste",             icon: "",   win: false },
+            { title: "No ganaste",             icon: "",   win: false },
+            { title: "No ganaste",             icon: "",   win: false },
+            { title: "No ganaste",             icon: "",   win: false }
+        ];
+
+        // ---------- Utilidades ----------
+        function fnv(str) {
+            let h = 0x811c9dc5;
+            for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+            return (h >>> 0).toString(36).toUpperCase();
+        }
+        function b64e(s) {
+            const bytes = new TextEncoder().encode(s); let bin = '';
+            bytes.forEach(b => bin += String.fromCharCode(b));
+            return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function b64d(s) {
+            s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
+            const bin = atob(s);
+            return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+        }
+        function shuffleIdx(n) {
+            const a = [...Array(n).keys()];
+            for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+            return a;
+        }
+        function randomId() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
+        function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+        function load(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+        const wait = ms => new Promise(r => setTimeout(r, ms));
+
+        // ================= SONIDO (Web Audio, sin archivos) =================
+        let actx = null;
+        let muted = load('py_cards_muted', false);
+        function ac() {
+            if (!actx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; actx = new C(); }
+            if (actx.state === 'suspended') actx.resume();
+            return actx;
+        }
+        function tone(freq, start, dur, type = 'sine', vol = 0.15, freqEnd) {
+            const c = ac(); if (!c || muted) return;
+            const t = c.currentTime + start;
+            const o = c.createOscillator(), g = c.createGain();
+            o.type = type; o.frequency.setValueAtTime(freq, t);
+            if (freqEnd) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+            g.gain.setValueAtTime(0.0001, t);
+            g.gain.exponentialRampToValueAtTime(vol, t + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            o.connect(g).connect(c.destination); o.start(t); o.stop(t + dur + 0.05);
+        }
+        function whoosh(start, dur, vol, f1, f2) {
+            const c = ac(); if (!c || muted) return;
+            const t = c.currentTime + start;
+            const buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate);
+            const d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+            const src = c.createBufferSource(); src.buffer = buf;
+            const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 1.2;
+            f.frequency.setValueAtTime(f1, t); f.frequency.exponentialRampToValueAtTime(f2, t + dur);
+            const g = c.createGain();
+            g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + dur * 0.4);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+            src.connect(f).connect(g).connect(c.destination); src.start(t); src.stop(t + dur);
+        }
+        const sfx = {
+            tap()      { tone(900, 0, 0.06, 'square', 0.04); },
+            deal(i)    { tone(420 + i * 45, 0, 0.08, 'triangle', 0.07); },
+            suspense() { for (let i = 0; i < 6; i++) tone(280 + i * 40, i * 0.09, 0.06, 'square', 0.035); },
+            flip()     { whoosh(0, 0.5, 0.3, 500, 3500); },
+            softFlip() { whoosh(0, 0.35, 0.12, 700, 2800); },
+            win() {
+                [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.16, 0.45, 'triangle', 0.16));
+                [1568, 2093, 2637].forEach((f, i) => tone(f, 0.75 + i * 0.09, 0.5, 'sine', 0.06));
+            },
+            lose() { tone(392, 0, 0.45, 'sine', 0.14, 370); tone(311, 0.4, 0.8, 'sine', 0.14, 247); },
+            open() { tone(620, 0, 0.18, 'sine', 0.07, 940); },
+            error(){ tone(180, 0, 0.25, 'sawtooth', 0.06); }
+        };
+        function toggleMute() {
+            muted = !muted; store('py_cards_muted', muted);
+            document.getElementById('mute-btn').innerText = muted ? '🔇' : '🔊';
+            if (!muted) sfx.tap();
+        }
+
+        // ================= ENLACE DEL CLIENTE =================
+        let session = { id: 'GENERAL', name: '', attempts: 2, valid: true };
+
+        function signPayload(json) { return fnv(json + '|' + LINK_SECRET); }
+
+        function readLinkFromUrl() {
+            const t = new URLSearchParams(location.search).get('t');
+            if (!t) return;
+            try {
+                const [data, sig] = t.split('.');
+                const json = b64d(data);
+                if (signPayload(json) !== sig) throw new Error('firma');
+                const p = JSON.parse(json);
+                session = {
+                    id: String(p.i),
+                    name: String(p.n || ''),
+                    attempts: Math.min(MAX_ATTEMPTS, Math.max(1, parseInt(p.a, 10) || 2)),
+                    valid: true
+                };
+            } catch (e) {
+                session.valid = false;
+            }
+        }
+
+        // ================= ESTADO DEL JUEGO =================
+        let state = null;     // { order:[], picks:[{pos, p}] }
+        let busy = false;
+
+        const stateKey = () => 'py_cards_' + session.id;
+        const attemptsLeft = () => session.attempts - state.picks.length;
+
+        function loadState() {
+            state = load(stateKey(), null);
+            if (!state || !Array.isArray(state.order) || state.order.length !== 9) {
+                state = { order: shuffleIdx(9), picks: [] };
+                store(stateKey(), state);
+            }
+        }
+
+        function resultCode() {
+            const prizes = state.picks.map(x => basePrizes[x.p]).filter(p => p.win).map(p => p.title).join(',');
+            return 'PY-' + session.id + '-' + fnv(session.id + '|' + prizes + '|' + LINK_SECRET).slice(0, 4);
+        }
+
+        function renderGame(animateDeal) {
+            if (!session.valid) {
+                document.getElementById('invalid-link').classList.remove('hidden');
+                document.getElementById('hint-text').classList.add('invisible');
+                document.getElementById('game-area').classList.add('hidden');
+                return;
+            }
+            const left = attemptsLeft();
+            document.getElementById('attempts-badge').innerText = `${left} / ${session.attempts}`;
+            updateHint();
+
+            const container = document.getElementById('grid-container');
+            container.innerHTML = '';
+            const pickedPos = new Map(state.picks.map(x => [x.pos, x.p]));
+
+            for (let i = 0; i < 9; i++) {
+                const prize = basePrizes[state.order[i]];
+                const isPicked = pickedPos.has(i);
+                const card = document.createElement('div');
+                card.className = 'card-container cursor-pointer select-none';
+                if (isPicked) card.classList.add('flipped', 'revealed', 'no-anim');
+                if (left <= 0 && !isPicked) card.classList.add('flipped', 'ghost', 'no-anim');
+                if (animateDeal) { card.classList.add('deal'); card.style.setProperty('--d', (i * 110) + 'ms'); }
+
+                card.innerHTML = `
+                    <div class="card-inner">
+                        <div class="card-front"><span class="text-3xl font-black text-white drop-shadow">${i + 1}</span></div>
+                        <div class="card-back p-1 ${prize.win ? 'win' : ''}">
+                            ${prize.icon ? `<span class="text-2xl mb-1">${prize.icon}</span>` : ''}
+                            <span class="${prize.win ? 'text-[13px]' : 'text-[15px] text-slate-500'} font-extrabold leading-tight text-center px-0.5">${prize.title}</span>
+                        </div>
+                    </div>`;
+                card.addEventListener('click', () => handleCardClick(card, i));
+                container.appendChild(card);
+            }
+
+            if (animateDeal) {
+                for (let i = 0; i < 9; i++) setTimeout(() => sfx.deal(i), i * 110 + 150);
+                setTimeout(() => container.querySelectorAll('.deal').forEach(c => c.classList.remove('deal')), 9 * 110 + 800);
+            }
+            renderPrizes();
+        }
+
+        function updateHint() {
+            const left = attemptsLeft();
+            const el = document.getElementById('hint-text');
+            if (left <= 0) el.innerText = '¡Ya usaste todas tus oportunidades!';
+            else if (state.picks.length === 0)
+                el.innerText = `¡Elige con cuidado, solo tienes ${session.attempts} ${session.attempts === 1 ? 'oportunidad' : 'oportunidades'}!`;
+            else el.innerText = left === 1 ? '¡Te queda una oportunidad!' : `¡Te quedan ${left} oportunidades!`;
+            el.classList.toggle('animate-pulse', left > 0);
+        }
+
+        function highlightSend() {
+            const btn = document.getElementById('send-result-btn');
+            btn.classList.remove('hidden');
+            btn.classList.add('attention');
+            btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            sfx.open();
+        }
+
+        function renderPrizes() {
+            const wins = state.picks.map(x => basePrizes[x.p]).filter(p => p.win);
+            const panel = document.getElementById('prizes-panel');
+            const list = document.getElementById('prizes-list');
+            document.getElementById('send-result-btn').classList.toggle('hidden', wins.length === 0); // solo si ganó algo
+            document.getElementById('send-result-btn').classList.toggle('attention', attemptsLeft() <= 0);
+
+            if (!wins.length) { panel.classList.add('hidden'); return; }
+            panel.classList.remove('hidden');
+
+            const boletas = wins.filter(p => p.type === 'boleta').reduce((s, p) => s + p.qty, 0);
+            const cuotas  = wins.filter(p => p.type === 'cuota').reduce((s, p) => s + p.qty, 0);
+            document.getElementById('prizes-count').innerText = `${wins.length} ${wins.length === 1 ? 'premio' : 'premios'}`;
+
+            let html = '';
+            if (boletas) html += row('🎟️', `${boletas} ${boletas === 1 ? 'boleta extra' : 'boletas extra'}`);
+            if (cuotas)  html += row('📅', `${cuotas} ${cuotas === 1 ? 'cuota corrida' : 'cuotas corridas'}`);
+            list.innerHTML = html;
+
+            function row(icon, text) {
+                return `<div class="prize-row flex items-center gap-2 bg-slate-100 rounded-lg px-3 py-2">
+                    <span class="text-lg">${icon}</span><span class="text-xs font-semibold text-slate-800">${text}</span></div>`;
+            }
+        }
+
+        async function handleCardClick(card, pos) {
+            if (busy || !session.valid || attemptsLeft() <= 0 || card.classList.contains('flipped')) return;
+            busy = true;
+            ac();
+
+            // 1) Voltear
+            const p = state.order[pos];
+            state.picks.push({ pos, p });
+            store(stateKey(), state);
+            document.getElementById('attempts-badge').innerText = `${attemptsLeft()} / ${session.attempts}`;
+            updateHint();
+            card.classList.add('flipped');
+            sfx.flip();
+            await wait(800);
+
+            // 3) Revelar
+            card.classList.add('revealed');
+            const prize = basePrizes[p];
+            if (prize.win) {
+                sfx.win();
+                celebrate();
+            } else {
+                sfx.lose();
+            }
+            renderPrizes();
+            await wait(700);
+
+            if (attemptsLeft() <= 0) {
+                // Bloquear todo y destapar el resto en cascada, difuminadas
+                const rest = [...document.querySelectorAll('#grid-container .card-container:not(.flipped)')];
+                rest.forEach(c => c.classList.add('pointer-events-none'));
+                await wait(400);
+                for (const c of rest) {
+                    c.classList.add('ghost', 'flipped');
+                    sfx.softFlip();
+                    await wait(320);
+                }
+                await wait(700);
+                if (state.picks.some(x => basePrizes[x.p].win)) highlightSend();
+            } else {
+                showModal(prize);
+            }
+            busy = false;
+        }
+
+        function celebrate() {
+            if (typeof confetti !== 'function') return;
+            const opts = { spread: 70, gravity: 0.55, ticks: 320, scalar: 1.1, origin: { y: 0.6 } };
+            confetti({ ...opts, particleCount: 60 });
+            setTimeout(() => confetti({ ...opts, particleCount: 40, angle: 60,  origin: { x: 0, y: 0.7 } }), 350);
+            setTimeout(() => confetti({ ...opts, particleCount: 40, angle: 120, origin: { x: 1, y: 0.7 } }), 650);
+        }
+
+        // ================= MODALES =================
+        function openModalEl(id) {
+            const m = document.getElementById(id);
+            m.classList.remove('hidden-modal');
+            m.classList.remove('show'); void m.offsetWidth; m.classList.add('show');
+        }
+        function closeModalEl(id) {
+            const m = document.getElementById(id);
+            m.classList.add('hidden-modal'); m.classList.remove('show');
+        }
+
+        function showModal(prize) {
+            const left = attemptsLeft();
+            const icon = document.getElementById('modal-icon');
+            const title = document.getElementById('modal-title');
+            const message = document.getElementById('modal-message');
+            const codeBox = document.getElementById('code-box');
+            const sendBtn = document.getElementById('modal-send-btn');
+            const anyWin = state.picks.some(x => basePrizes[x.p].win);
+
+            if (prize.win) {
+                icon.innerText = prize.icon;
+                title.innerText = "¡FELICIDADES!";
+                message.innerText = `Has ganado: ${prize.title}` + (left > 0 ? `. ¡Te ${left === 1 ? 'queda 1 oportunidad' : 'quedan ' + left + ' oportunidades'} para acumular más!` : '');
+            } else {
+                icon.innerText = "🍀";
+                title.innerText = "¡Sigue intentando!";
+                message.innerText = left > 0
+                    ? `Esta carta no tenía premio. ¡Aún te ${left === 1 ? 'queda 1 oportunidad' : 'quedan ' + left + ' oportunidades'}!`
+                    : (anyWin ? 'Esta carta no tenía premio, pero conservas tus premios acumulados.' : 'Esta vez no hubo suerte. ¡Gracias por participar!');
+            }
+
+            codeBox.classList.add('hidden');
+            document.getElementById('modal-continue-btn').classList.toggle('hidden', left <= 0);
+            document.getElementById('promo-code').innerText = resultCode();
+            sendBtn.classList.toggle('hidden', left > 0);
+            openModalEl('result-modal');
+            sfx.open();
+        }
+        function closeModal() { sfx.tap(); closeModalEl('result-modal'); }
+
+        // ================= ENVIAR RESULTADO A WHATSAPP =================
+        function sendResult() {
+            const wins = state.picks.map(x => basePrizes[x.p]).filter(p => p.win);
+            const boletas = wins.filter(p => p.type === 'boleta').reduce((s, p) => s + p.qty, 0);
+            const cuotas  = wins.filter(p => p.type === 'cuota').reduce((s, p) => s + p.qty, 0);
+
+            let msg = `🃏 *PrestaYa – Elige tu Carta*\n`;
+            msg += `👤 Cliente: ${session.name || '(sin nombre)'}\n`;
+            msg += `🔖 Juego: ${session.id}\n\n`;
+            msg += `*Cartas destapadas (${state.picks.length}/${session.attempts}):*\n`;
+            state.picks.forEach(x => { const p = basePrizes[x.p]; msg += `• Carta #${x.pos + 1} → ${p.icon ? p.icon + ' ' : ''}${p.title}\n`; });
+            msg += `\n🏆 *Premios acumulados:* `;
+            if (!wins.length) msg += 'ninguno';
+            else {
+                const parts = [];
+                if (boletas) parts.push(`${boletas} ${boletas === 1 ? 'boleta extra' : 'boletas extra'}`);
+                if (cuotas)  parts.push(`${cuotas} ${cuotas === 1 ? 'cuota corrida' : 'cuotas corridas'}`);
+                msg += parts.join(' + ');
+            }
+            msg += `\n🔐 Código: *${resultCode()}*`;
+
+            sfx.tap();
+            window.open(`https://wa.me/${ADMIN_PHONE}?text=${encodeURIComponent(msg)}`, '_blank');
+        }
+
+        // ================= ADMIN =================
+        let logoTaps = 0, logoTimer = null;
+        document.getElementById('brand-logo').addEventListener('click', () => {
+            logoTaps++;
+            clearTimeout(logoTimer);
+            logoTimer = setTimeout(() => { logoTaps = 0; }, 1500);
+            if (logoTaps >= 5) { logoTaps = 0; openPinModal(); }
+        });
+
+        // El dispositivo del administrador queda recordado (localStorage) hasta tocar "Salir".
+        // La marca depende del PIN: si cambias el PIN, todos los dispositivos deben volver a ingresarlo.
+        const ADMIN_MARK = () => fnv('admin|' + ADMIN_PIN.toLowerCase() + '|' + LINK_SECRET);
+        function isAdmin() { try { return localStorage.getItem('py_admin_device') === ADMIN_MARK(); } catch (e) { return false; } }
+
+        function openPinModal() {
+            if (isAdmin()) { applyAdminUI(); return; }
+            const input = document.getElementById('pin-input');
+            input.value = '';
+            document.getElementById('pin-error').classList.add('hidden');
+            openModalEl('pin-modal'); sfx.open();
+            setTimeout(() => input.focus(), 80);
+        }
+        function closePinModal() { closeModalEl('pin-modal'); }
+
+        function checkPin() {
+            const input = document.getElementById('pin-input');
+            if (input.value.trim().toLowerCase() === ADMIN_PIN.toLowerCase()) {
+                try { localStorage.setItem('py_admin_device', ADMIN_MARK()); } catch (e) {}
+                closePinModal(); sfx.win();
+                applyAdminUI();
+                showTab('gen', true);
+            } else {
+                const card = document.getElementById('pin-card');
+                document.getElementById('pin-error').classList.remove('hidden');
+                card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
+                sfx.error();
+                input.value = ''; input.focus();
+            }
+        }
+        document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') checkPin(); });
+
+        function applyAdminUI() {
+            const admin = isAdmin();
+            document.getElementById('admin-tabs').classList.toggle('hidden', !admin);
+            document.getElementById('admin-reset-btn').classList.toggle('hidden', !admin);
+            if (!admin) showTab('carton', true);
+            else renderHistory();
+            updateInstallBtn();
+        }
+        function exitAdmin() {
+            if (!confirm('Este dispositivo dejará de ser administrador. Para volver a ver el Generador tendrás que ingresar el PIN. ¿Continuar?')) return;
+            try { localStorage.removeItem('py_admin_device'); } catch (e) {}
+            sfx.tap(); applyAdminUI();
+        }
+
+        function showTab(tab, silent) {
+            if (!silent) sfx.tap();
+            document.getElementById('view-carton').classList.toggle('hidden', tab !== 'carton');
+            document.getElementById('view-gen').classList.toggle('hidden', tab !== 'gen');
+            document.getElementById('hint-wrap').classList.toggle('hidden', tab !== 'carton');
+            const on = 'bg-emerald-600 text-white shadow-sm', off = 'text-slate-500';
+            const tc = document.getElementById('tab-carton'), tg = document.getElementById('tab-gen');
+            tc.className = 'px-5 py-1.5 rounded-full text-xs font-bold ' + (tab === 'carton' ? on : off);
+            tg.className = 'px-5 py-1.5 rounded-full text-xs font-bold ' + (tab === 'gen' ? on : off);
+        }
+
+        function resetCurrentGame() {
+            if (!isAdmin()) return;
+            if (!confirm('¿Reiniciar los intentos de este juego en este dispositivo?')) return;
+            try { localStorage.removeItem(stateKey()); } catch (e) {}
+            closeModalEl('result-modal');
+            loadState(); renderGame(true);
+        }
+
+        // ================= GENERADOR =================
+        let genAttempts = 2;
+        let lastLink = null;
+
+        function changeGenAttempts(d) {
+            genAttempts = Math.min(MAX_ATTEMPTS, Math.max(1, genAttempts + d));
+            document.getElementById('gen-attempts').innerText = genAttempts;
+            sfx.tap();
+        }
+
+        function baseUrl() { return location.origin + location.pathname; }
+
+        function generateLink() {
+            const nameEl = document.getElementById('gen-name');
+            const name = nameEl.value.trim();
+            if (!name) { nameEl.focus(); nameEl.classList.add('shake'); setTimeout(() => nameEl.classList.remove('shake'), 400); sfx.error(); return; }
+            const phone = document.getElementById('gen-phone').value.replace(/\D/g, '');
+            const id = randomId();
+            const json = JSON.stringify({ i: id, n: name, a: genAttempts });
+            const token = b64e(json) + '.' + signPayload(json);
+            const url = baseUrl() + '?t=' + token;
+
+            lastLink = { id, name, phone, attempts: genAttempts, url, date: new Date().toISOString() };
+            document.getElementById('gen-id').innerText = id;
+            document.getElementById('gen-link').innerText = url;
+            document.getElementById('gen-result').classList.remove('hidden');
+            document.getElementById('native-share-btn').classList.toggle('hidden', !navigator.share);
+
+            const hist = load('py_gen_history', []);
+            hist.unshift(lastLink);
+            store('py_gen_history', hist.slice(0, 30));
+            renderHistory();
+            sfx.win();
+        }
+
+        function clientMessage(l) {
+            return `¡Hola ${l.name}! 🎉 PrestaYa te regala ${l.attempts} ${l.attempts === 1 ? 'oportunidad' : 'oportunidades'} para destapar cartas y ganar boletas adicionales para la rifa. Entra aquí 👉 ${l.url}`;
+        }
+
+        async function copyText(text) {
+            try { await navigator.clipboard.writeText(text); return true; }
+            catch (e) {
+                const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+                ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
+                ta.remove(); return ok;
+            }
+        }
+        async function copyLink(l) {
+            l = l || lastLink; if (!l) return;
+            const ok = await copyText(l.url);
+            const btn = document.getElementById('copy-btn');
+            if (btn && l === lastLink) { btn.innerText = ok ? '✅ Copiado' : '❌ Error'; setTimeout(() => btn.innerText = '📋 Copiar', 1600); }
+            sfx.tap();
+        }
+        function shareToClient(l) {
+            l = l || lastLink; if (!l) return;
+            let phone = (l.phone || '').replace(/\D/g, '');
+            if (phone.length === 10) phone = '57' + phone;
+            const url = phone
+                ? `https://wa.me/${phone}?text=${encodeURIComponent(clientMessage(l))}`
+                : `https://wa.me/?text=${encodeURIComponent(clientMessage(l))}`;
+            sfx.tap();
+            window.open(url, '_blank');
+        }
+        function nativeShare() {
+            if (!lastLink || !navigator.share) return;
+            navigator.share({ title: 'PrestaYa – Elige tu Carta', text: clientMessage(lastLink) }).catch(() => {});
+        }
+
+        function renderHistory() {
+            const hist = load('py_gen_history', []);
+            const box = document.getElementById('gen-history');
+            if (!hist.length) { box.innerHTML = '<p class="text-slate-500 text-[11px]">Aún no has generado enlaces.</p>'; return; }
+            box.innerHTML = hist.map((h, i) => {
+                const d = new Date(h.date);
+                const fecha = d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+                return `<div class="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2">
+                    <div class="min-w-0">
+                        <p class="font-bold text-slate-900 truncate">${escapeHtml(h.name)}</p>
+                        <p class="text-[10px] text-slate-500">${h.id} · ${h.attempts} op. · ${fecha}</p>
+                    </div>
+                    <div class="flex gap-1 shrink-0">
+                        <button onclick="histAction(${i},'copy')" class="w-8 h-8 rounded-lg bg-slate-200">📋</button>
+                        <button onclick="histAction(${i},'send')" class="w-8 h-8 rounded-lg bg-emerald-100">💬</button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+        function histAction(i, act) {
+            const h = load('py_gen_history', [])[i]; if (!h) return;
+            if (act === 'copy') copyLink(h); else shareToClient(h);
+        }
+        function clearHistory() {
+            if (!confirm('¿Borrar la lista de enlaces generados?')) return;
+            store('py_gen_history', []); renderHistory();
+        }
+        function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+        // ================= INICIO =================
+        function init() {
+            document.getElementById('mute-btn').innerText = muted ? '🔇' : '🔊';
+            readLinkFromUrl();
+            if (session.valid && session.name) {
+                const g = document.getElementById('client-greeting');
+                g.innerText = `¡Hola, ${session.name}! 👋`;
+                g.classList.remove('hidden');
+            }
+            if (session.valid) loadState();
+            showTab('carton', true);
+            applyAdminUI();
+            // En el celular del administrador, si abre la app sin enlace de cliente, entra directo al Generador
+            if (isAdmin() && !new URLSearchParams(location.search).get('t')) showTab('gen', true);
+            renderGame(true);
+            // Desbloquear audio con el primer toque (requisito de los navegadores)
+            document.addEventListener('pointerdown', () => ac(), { once: true });
+        }
+        window.addEventListener('load', init);
+
+        // ================= INSTALAR APP (solo administrador) =================
+        let deferredPrompt = null;
+        const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();          // no mostrar el aviso automático a los clientes
+            deferredPrompt = e;
+            updateInstallBtn();
+        });
+        window.addEventListener('appinstalled', () => { deferredPrompt = null; updateInstallBtn(); });
+
+        function updateInstallBtn() {
+            const btn = document.getElementById('install-btn');
+            if (btn) btn.classList.toggle('hidden', !(isAdmin() && !isStandalone()));
+        }
+
+        async function installApp() {
+            if (!isAdmin()) return;
+            sfx.tap();
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                try { await deferredPrompt.userChoice; } catch (e) {}
+                deferredPrompt = null;
+                updateInstallBtn();
+                return;
+            }
+            const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+            document.getElementById('install-help').innerHTML = ios
+                ? 'En Safari toca <b>Compartir</b> <span class="whitespace-nowrap">(cuadro con flecha ↑)</span> y luego <b>Agregar a pantalla de inicio</b>.'
+                : 'En Chrome toca el menú <b>⋮</b> (arriba a la derecha) y elige <b>Instalar app</b> o <b>Agregar a pantalla principal</b>.<br><br>Si no aparece, es posible que la app ya esté instalada en este celular.';
+            openModalEl('install-modal'); sfx.open();
+        }
+
+        // ================= PWA =================
+        if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW no registrado:', err));
+            });
+        }
+    </script>
+</body>
+</html>
