@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PrestaYa - Elige tu Carta</title>
-    <!-- Versión 3.0 (PWA · modo claro) -->
+    <!-- Versión 3.1 (PWA · modo claro) -->
     <meta name="theme-color" content="#f8fafc">
     <meta name="description" content="Destapa cartas y gana boletas adicionales para la rifa de PrestaYa.">
     <link rel="manifest" href="manifest.json">
@@ -234,6 +234,33 @@
             </div>
             <div id="gen-history" class="flex flex-col gap-2 text-xs"></div>
         </div>
+
+        <!-- Premios y probabilidades -->
+        <div class="glass rounded-2xl p-5">
+            <h3 class="text-sm font-bold text-slate-900">🎁 Premios y probabilidades</h3>
+            <p class="text-[11px] text-slate-500 mt-1 mb-3">El tablero tiene 9 cartas. Elige cuántas cartas lleva cada premio: más cartas = más probabilidad. Las cartas sobrantes salen como <b>"No ganaste"</b>.</p>
+
+            <div class="grid grid-cols-[2.5rem_1fr_3.2rem] gap-1.5 text-[10px] font-semibold text-slate-500 px-1 mb-1">
+                <span class="text-center">Ícono</span><span>Nombre del premio</span><span class="text-center">Boletas</span>
+            </div>
+            <div id="prize-editor" class="flex flex-col gap-2"></div>
+
+            <button onclick="addPrizeRow()" id="add-prize-btn" class="w-full mt-2 border-2 border-dashed border-emerald-300 text-emerald-700 py-2 rounded-xl text-xs font-bold">+ Agregar premio</button>
+
+            <div id="lose-row" class="mt-3 flex items-center justify-between bg-slate-100 rounded-xl px-3 py-2.5 text-xs">
+                <span class="font-bold text-slate-600">No ganaste</span>
+                <span id="lose-info" class="text-slate-500"></span>
+            </div>
+
+            <div id="cfg-summary" class="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900"></div>
+            <p id="cfg-error" class="hidden text-[11px] text-red-500 mt-2"></p>
+
+            <div class="grid grid-cols-2 gap-2 mt-3">
+                <button onclick="resetPrizeCfg()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 py-2.5 rounded-xl text-xs font-bold">↺ Restaurar</button>
+                <button onclick="savePrizeCfg()" id="save-cfg-btn" class="bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-bold">💾 Guardar premios</button>
+            </div>
+            <p class="text-[10px] text-slate-400 mt-2 text-center">Los cambios aplican a los enlaces que generes después de guardar. Los enlaces ya enviados conservan sus premios.</p>
+        </div>
     </section>
 
     <!-- Modal de resultado -->
@@ -289,7 +316,7 @@
     <div class="flex-1 min-h-[16px]"></div>
 
     <footer class="text-center py-2 text-[10px] text-slate-500">
-        PrestaYa © 2026 • Todos los derechos reservados · v3.0
+        PrestaYa © 2026 • Todos los derechos reservados · v3.1
     </footer>
 
     <script>
@@ -300,17 +327,57 @@
         const MAX_ATTEMPTS = 5;
         // =================================================
 
-        const basePrizes = [
-            { title: "1 Boleta más",           icon: "🎟️", win: true, type: "boleta", qty: 1 },
-            { title: "1 Boleta más",           icon: "🎟️", win: true, type: "boleta", qty: 1 },
-            { title: "No ganaste",             icon: "",   win: false },
-            { title: "No ganaste",             icon: "",   win: false },
-            { title: "2 Boletas más",          icon: "🔥", win: true, type: "boleta", qty: 2 },
-            { title: "No ganaste",             icon: "",   win: false },
-            { title: "No ganaste",             icon: "",   win: false },
-            { title: "No ganaste",             icon: "",   win: false },
-            { title: "No ganaste",             icon: "",   win: false }
+        // Premios por defecto: t = nombre, i = ícono, b = boletas que suma (0 = otro tipo de premio), c = cartas
+        const DEFAULT_PRIZES = [
+            { t: "1 Boleta más",  i: "🎟️", b: 1, c: 2 },
+            { t: "2 Boletas más", i: "🔥", b: 2, c: 1 }
         ];
+        // Mazo original (enlaces creados antes de la v3.1 siguen usándolo)
+        const LEGACY_DECK = [
+            { title: "1 Boleta más",  icon: "🎟️", win: true, qty: 1 },
+            { title: "1 Boleta más",  icon: "🎟️", win: true, qty: 1 },
+            { title: "No ganaste",    icon: "",   win: false },
+            { title: "No ganaste",    icon: "",   win: false },
+            { title: "2 Boletas más", icon: "🔥", win: true, qty: 2 },
+            { title: "No ganaste",    icon: "",   win: false },
+            { title: "No ganaste",    icon: "",   win: false },
+            { title: "No ganaste",    icon: "",   win: false },
+            { title: "No ganaste",    icon: "",   win: false }
+        ];
+        let deck = LEGACY_DECK;
+
+        function sanitizeCfg(cfg) {
+            if (!Array.isArray(cfg)) return null;
+            const out = []; let total = 0;
+            for (const p of cfg.slice(0, 9)) {
+                const t = String((p && p.t) || '').trim().slice(0, 22);
+                const i = String((p && p.i) || '').trim().slice(0, 8);
+                const b = Math.max(0, Math.min(20, parseInt(p && p.b, 10) || 0));
+                let c = Math.max(0, Math.min(9, parseInt(p && p.c, 10) || 0));
+                if (!t) continue;
+                c = Math.min(c, 9 - total); total += c;
+                out.push({ t, i, b, c });
+            }
+            return out;
+        }
+        function buildDeck(cfg) {
+            const d = [];
+            cfg.forEach(p => { for (let k = 0; k < p.c; k++) d.push({ title: p.t, icon: p.i || '🎁', win: true, qty: p.b }); });
+            while (d.length < 9) d.push({ title: "No ganaste", icon: "", win: false });
+            return d.slice(0, 9);
+        }
+        function savedCfg() { return sanitizeCfg(load('py_prize_cfg', null)) || DEFAULT_PRIZES.map(p => ({ ...p })); }
+        const deckSig = () => fnv(deck.map(p => p.title + '|' + (p.qty || 0) + '|' + p.win).join(','));
+
+        function summarizeWins(wins) {
+            const boletas = wins.reduce((s, p) => s + (p.qty || 0), 0);
+            const others = [];
+            wins.filter(p => !p.qty).forEach(p => {
+                const o = others.find(x => x.title === p.title);
+                if (o) o.n++; else others.push({ title: p.title, icon: p.icon, n: 1 });
+            });
+            return { boletas, others };
+        }
 
         // ---------- Utilidades ----------
         function fnv(str) {
@@ -407,6 +474,8 @@
                     id: String(p.i),
                     name: String(p.n || ''),
                     attempts: Math.min(MAX_ATTEMPTS, Math.max(1, parseInt(p.a, 10) || 2)),
+                    cfg: sanitizeCfg(p.p),
+                    fromLink: true,
                     valid: true
                 };
             } catch (e) {
@@ -421,16 +490,25 @@
         const stateKey = () => 'py_cards_' + session.id;
         const attemptsLeft = () => session.attempts - state.picks.length;
 
+        function resolveDeck() {
+            if (session.cfg) deck = buildDeck(session.cfg);                         // enlace nuevo: premios del enlace
+            else if (session.fromLink) deck = LEGACY_DECK;                          // enlace antiguo
+            else deck = load('py_prize_cfg', null) ? buildDeck(savedCfg()) : LEGACY_DECK; // sin enlace: premios guardados
+        }
+
         function loadState() {
             state = load(stateKey(), null);
-            if (!state || !Array.isArray(state.order) || state.order.length !== 9) {
+            const sig = deckSig();
+            const legacyOk = state && !state.sig && deck === LEGACY_DECK;
+            if (!state || !Array.isArray(state.order) || state.order.length !== 9 || (state.sig !== sig && !legacyOk)) {
                 state = { order: shuffleIdx(9), picks: [] };
-                store(stateKey(), state);
             }
+            state.sig = sig;
+            store(stateKey(), state);
         }
 
         function resultCode() {
-            const prizes = state.picks.map(x => basePrizes[x.p]).filter(p => p.win).map(p => p.title).join(',');
+            const prizes = state.picks.map(x => deck[x.p]).filter(p => p.win).map(p => p.title).join(',');
             return 'PY-' + session.id + '-' + fnv(session.id + '|' + prizes + '|' + LINK_SECRET).slice(0, 4);
         }
 
@@ -450,7 +528,7 @@
             const pickedPos = new Map(state.picks.map(x => [x.pos, x.p]));
 
             for (let i = 0; i < 9; i++) {
-                const prize = basePrizes[state.order[i]];
+                const prize = deck[state.order[i]];
                 const isPicked = pickedPos.has(i);
                 const card = document.createElement('div');
                 card.className = 'card-container cursor-pointer select-none';
@@ -462,8 +540,8 @@
                     <div class="card-inner">
                         <div class="card-front"><span class="text-3xl font-black text-white drop-shadow">${i + 1}</span></div>
                         <div class="card-back p-1 ${prize.win ? 'win' : ''}">
-                            ${prize.icon ? `<span class="text-2xl mb-1">${prize.icon}</span>` : ''}
-                            <span class="${prize.win ? 'text-[13px]' : 'text-[15px] text-slate-500'} font-extrabold leading-tight text-center px-0.5">${prize.title}</span>
+                            ${prize.icon ? `<span class="text-2xl mb-1">${escapeHtml(prize.icon)}</span>` : ''}
+                            <span class="${prize.win ? 'text-[13px]' : 'text-[15px] text-slate-500'} font-extrabold leading-tight text-center px-0.5 break-words">${escapeHtml(prize.title)}</span>
                         </div>
                     </div>`;
                 card.addEventListener('click', () => handleCardClick(card, i));
@@ -496,7 +574,7 @@
         }
 
         function renderPrizes() {
-            const wins = state.picks.map(x => basePrizes[x.p]).filter(p => p.win);
+            const wins = state.picks.map(x => deck[x.p]).filter(p => p.win);
             const panel = document.getElementById('prizes-panel');
             const list = document.getElementById('prizes-list');
             document.getElementById('send-result-btn').classList.toggle('hidden', wins.length === 0); // solo si ganó algo
@@ -505,13 +583,12 @@
             if (!wins.length) { panel.classList.add('hidden'); return; }
             panel.classList.remove('hidden');
 
-            const boletas = wins.filter(p => p.type === 'boleta').reduce((s, p) => s + p.qty, 0);
-            const cuotas  = wins.filter(p => p.type === 'cuota').reduce((s, p) => s + p.qty, 0);
+            const { boletas, others } = summarizeWins(wins);
             document.getElementById('prizes-count').innerText = `${wins.length} ${wins.length === 1 ? 'premio' : 'premios'}`;
 
             let html = '';
             if (boletas) html += row('🎟️', `${boletas} ${boletas === 1 ? 'boleta extra' : 'boletas extra'}`);
-            if (cuotas)  html += row('📅', `${cuotas} ${cuotas === 1 ? 'cuota corrida' : 'cuotas corridas'}`);
+            others.forEach(o => html += row(escapeHtml(o.icon), escapeHtml(o.title) + (o.n > 1 ? ` ×${o.n}` : '')));
             list.innerHTML = html;
 
             function row(icon, text) {
@@ -537,7 +614,7 @@
 
             // 3) Revelar
             card.classList.add('revealed');
-            const prize = basePrizes[p];
+            const prize = deck[p];
             if (prize.win) {
                 sfx.win();
                 celebrate();
@@ -558,7 +635,7 @@
                     await wait(320);
                 }
                 await wait(700);
-                if (state.picks.some(x => basePrizes[x.p].win)) highlightSend();
+                if (state.picks.some(x => deck[x.p].win)) highlightSend();
             } else {
                 showModal(prize);
             }
@@ -591,7 +668,7 @@
             const message = document.getElementById('modal-message');
             const codeBox = document.getElementById('code-box');
             const sendBtn = document.getElementById('modal-send-btn');
-            const anyWin = state.picks.some(x => basePrizes[x.p].win);
+            const anyWin = state.picks.some(x => deck[x.p].win);
 
             if (prize.win) {
                 icon.innerText = prize.icon;
@@ -616,21 +693,20 @@
 
         // ================= ENVIAR RESULTADO A WHATSAPP =================
         function sendResult() {
-            const wins = state.picks.map(x => basePrizes[x.p]).filter(p => p.win);
-            const boletas = wins.filter(p => p.type === 'boleta').reduce((s, p) => s + p.qty, 0);
-            const cuotas  = wins.filter(p => p.type === 'cuota').reduce((s, p) => s + p.qty, 0);
+            const wins = state.picks.map(x => deck[x.p]).filter(p => p.win);
+            const { boletas, others } = summarizeWins(wins);
 
             let msg = `🃏 *PrestaYa – Elige tu Carta*\n`;
             msg += `👤 Cliente: ${session.name || '(sin nombre)'}\n`;
             msg += `🔖 Juego: ${session.id}\n\n`;
             msg += `*Cartas destapadas (${state.picks.length}/${session.attempts}):*\n`;
-            state.picks.forEach(x => { const p = basePrizes[x.p]; msg += `• Carta #${x.pos + 1} → ${p.icon ? p.icon + ' ' : ''}${p.title}\n`; });
+            state.picks.forEach(x => { const p = deck[x.p]; msg += `• Carta #${x.pos + 1} → ${p.icon ? p.icon + ' ' : ''}${p.title}\n`; });
             msg += `\n🏆 *Premios acumulados:* `;
             if (!wins.length) msg += 'ninguno';
             else {
                 const parts = [];
                 if (boletas) parts.push(`${boletas} ${boletas === 1 ? 'boleta extra' : 'boletas extra'}`);
-                if (cuotas)  parts.push(`${cuotas} ${cuotas === 1 ? 'cuota corrida' : 'cuotas corridas'}`);
+                others.forEach(o => parts.push(o.title + (o.n > 1 ? ` ×${o.n}` : '')));
                 msg += parts.join(' + ');
             }
             msg += `\n🔐 Código: *${resultCode()}*`;
@@ -685,7 +761,7 @@
             document.getElementById('admin-tabs').classList.toggle('hidden', !admin);
             document.getElementById('admin-reset-btn').classList.toggle('hidden', !admin);
             if (!admin) showTab('carton', true);
-            else renderHistory();
+            else { renderHistory(); renderPrizeEditor(); }
             updateInstallBtn();
         }
         function exitAdmin() {
@@ -720,7 +796,105 @@
         function changeGenAttempts(d) {
             genAttempts = Math.min(MAX_ATTEMPTS, Math.max(1, genAttempts + d));
             document.getElementById('gen-attempts').innerText = genAttempts;
+            renderCfgSummary();
             sfx.tap();
+        }
+
+        // ================= PREMIOS Y PROBABILIDADES (admin) =================
+        let cfgDraft = null;
+
+        function comb(n, k) { if (k < 0 || k > n) return 0; let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
+        // Probabilidad de destapar al menos una de "c" cartas en "a" intentos (sin repetir carta)
+        function chanceAtLeastOne(c, a) { a = Math.min(a, 9); return c <= 0 ? 0 : 1 - comb(9 - c, a) / comb(9, a); }
+        const pct = x => (Math.round(x * 1000) / 10).toString().replace('.', ',') + '%';
+
+        function renderPrizeEditor() {
+            if (!cfgDraft) cfgDraft = savedCfg();
+            const box = document.getElementById('prize-editor');
+            box.innerHTML = cfgDraft.map((p, idx) => `
+                <div class="bg-white border border-slate-200 rounded-xl p-2">
+                    <div class="grid grid-cols-[2.5rem_1fr_3.2rem] gap-1.5">
+                        <input value="${escapeHtml(p.i)}" maxlength="8" oninput="editPrize(${idx},'i',this.value)" class="w-full text-center text-lg bg-slate-50 border border-slate-200 rounded-lg py-1 focus:outline-none focus:border-emerald-500" placeholder="🎁">
+                        <input value="${escapeHtml(p.t)}" maxlength="22" oninput="editPrize(${idx},'t',this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Nombre del premio">
+                        <input value="${p.b}" type="number" min="0" max="20" inputmode="numeric" oninput="editPrize(${idx},'b',this.value)" class="w-full text-center bg-slate-50 border border-slate-200 rounded-lg py-1 text-sm text-slate-900 focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="flex items-center justify-between mt-2">
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="changePrizeCards(${idx},-1)" class="w-8 h-8 rounded-lg bg-slate-200 font-bold">−</button>
+                            <span class="w-14 text-center text-xs"><b class="text-base text-emerald-700">${p.c}</b> ${p.c === 1 ? 'carta' : 'cartas'}</span>
+                            <button onclick="changePrizeCards(${idx},1)" class="w-8 h-8 rounded-lg bg-slate-200 font-bold">+</button>
+                        </div>
+                        <button onclick="removePrizeRow(${idx})" class="w-8 h-8 rounded-lg bg-red-50 text-red-500" title="Quitar premio">🗑</button>
+                    </div>
+                    <p id="prob-${idx}" class="text-[10px] text-slate-500 mt-1.5"></p>
+                </div>`).join('');
+            document.getElementById('add-prize-btn').classList.toggle('hidden', cfgDraft.length >= 9);
+            renderCfgSummary();
+        }
+
+        function renderCfgSummary() {
+            if (!cfgDraft) return;
+            const a = genAttempts;
+            const used = cfgDraft.reduce((s, p) => s + p.c, 0);
+            const lose = 9 - used;
+            cfgDraft.forEach((p, idx) => {
+                const el = document.getElementById('prob-' + idx); if (!el) return;
+                el.innerHTML = p.c
+                    ? `${pct(p.c / 9)} por carta · <b class="text-emerald-700">${pct(chanceAtLeastOne(p.c, a))}</b> de que salga con ${a} ${a === 1 ? 'oportunidad' : 'oportunidades'}`
+                    : 'Sin cartas: este premio no saldrá';
+            });
+            document.getElementById('lose-info').innerText = `${lose} ${lose === 1 ? 'carta' : 'cartas'} · ${pct(lose / 9)}`;
+            const winAny = chanceAtLeastOne(used, a);
+            const avgBol = cfgDraft.reduce((s, p) => s + p.b * p.c, 0) / 9 * Math.min(a, 9);
+            document.getElementById('cfg-summary').innerHTML =
+                `Con <b>${a} ${a === 1 ? 'oportunidad' : 'oportunidades'}</b> (las del generador):<br>
+                 • Probabilidad de ganar algo: <b>${pct(winAny)}</b><br>
+                 • Probabilidad de no ganar nada: <b>${pct(1 - winAny)}</b><br>
+                 • Boletas promedio por cliente: <b>${avgBol.toFixed(2).replace('.', ',')}</b>`;
+        }
+
+        function editPrize(idx, field, val) {
+            const p = cfgDraft[idx]; if (!p) return;
+            if (field === 'b') p.b = Math.max(0, Math.min(20, parseInt(val, 10) || 0));
+            else p[field] = val;
+            renderCfgSummary();
+        }
+        function changePrizeCards(idx, d) {
+            const used = cfgDraft.reduce((s, p) => s + p.c, 0);
+            const p = cfgDraft[idx];
+            if (d > 0 && used >= 9) { sfx.error(); showCfgError('Ya usaste las 9 cartas. Quita cartas de otro premio primero.'); return; }
+            p.c = Math.max(0, Math.min(9, p.c + d));
+            showCfgError(''); sfx.tap(); renderPrizeEditor();
+        }
+        function addPrizeRow() {
+            if (cfgDraft.length >= 9) return;
+            const used = cfgDraft.reduce((s, p) => s + p.c, 0);
+            cfgDraft.push({ t: 'Nuevo premio', i: '🎁', b: 0, c: used < 9 ? 1 : 0 });
+            sfx.tap(); renderPrizeEditor();
+        }
+        function removePrizeRow(idx) {
+            cfgDraft.splice(idx, 1); sfx.tap(); renderPrizeEditor();
+        }
+        function resetPrizeCfg() {
+            if (!confirm('¿Volver a los premios originales (2 × 1 Boleta más y 1 × 2 Boletas más)?')) return;
+            cfgDraft = DEFAULT_PRIZES.map(p => ({ ...p }));
+            showCfgError(''); renderPrizeEditor();
+        }
+        function showCfgError(msg) {
+            const el = document.getElementById('cfg-error');
+            el.innerText = msg; el.classList.toggle('hidden', !msg);
+        }
+        function savePrizeCfg() {
+            if (cfgDraft.some(p => !String(p.t).trim())) { sfx.error(); showCfgError('Todos los premios necesitan un nombre.'); return; }
+            const clean = sanitizeCfg(cfgDraft);
+            store('py_prize_cfg', clean);
+            cfgDraft = clean.map(p => ({ ...p }));
+            showCfgError(''); renderPrizeEditor();
+            // Si el administrador está jugando sin enlace, el tablero de prueba toma los premios nuevos
+            if (!session.fromLink) { resolveDeck(); loadState(); renderGame(false); }
+            const btn = document.getElementById('save-cfg-btn');
+            btn.innerText = '✅ Guardado'; setTimeout(() => btn.innerText = '💾 Guardar premios', 1600);
+            sfx.win();
         }
 
         function baseUrl() { return location.origin + location.pathname; }
@@ -731,7 +905,7 @@
             if (!name) { nameEl.focus(); nameEl.classList.add('shake'); setTimeout(() => nameEl.classList.remove('shake'), 400); sfx.error(); return; }
             const phone = document.getElementById('gen-phone').value.replace(/\D/g, '');
             const id = randomId();
-            const json = JSON.stringify({ i: id, n: name, a: genAttempts });
+            const json = JSON.stringify({ i: id, n: name, a: genAttempts, p: savedCfg() });
             const token = b64e(json) + '.' + signPayload(json);
             const url = baseUrl() + '?t=' + token;
 
@@ -820,6 +994,7 @@
                 g.innerText = `¡Hola, ${session.name}! 👋`;
                 g.classList.remove('hidden');
             }
+            resolveDeck();
             if (session.valid) loadState();
             showTab('carton', true);
             applyAdminUI();

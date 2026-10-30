@@ -1,4 +1,4 @@
-# PrestaYa – Elige tu Carta (v3.0)
+# PrestaYa – Elige tu Carta (v3.1)
 
 Juego PWA de 9 cartas con 2 oportunidades para ganar boletas adicionales para la rifa.
 
@@ -20,4 +20,5 @@ Juego PWA de 9 cartas con 2 oportunidades para ganar boletas adicionales para la
 - 5 toques sobre el logo **PRESTAYA** + PIN para entrar al Generador.
 - El PIN se cambia en `index.html`: `const ADMIN_PIN = "...";`
 - El botón verde **⬇ App** (arriba a la izquierda) para instalar la app solo lo ve el administrador.
+- En el Generador, abajo, está **Premios y probabilidades**: cambia nombres, íconos, boletas y cuántas cartas (de 9) lleva cada premio. Los enlaces nuevos llevan los premios guardados.
 - Al actualizar la app, sube también `sw.js` con su versión nueva.
