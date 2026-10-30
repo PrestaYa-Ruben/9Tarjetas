@@ -1,5 +1,5 @@
-// PrestaYa - Elige tu Carta · Service Worker v3.1
-const CACHE = 'py-cartas-v3.1';
+// PrestaYa - Elige tu Carta · Service Worker v3.2
+const CACHE = 'py-cartas-v3.2';
 const APP_SHELL = [
   './',
   './index.html',

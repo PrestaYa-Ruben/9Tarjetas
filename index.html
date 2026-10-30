@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PrestaYa - Elige tu Carta</title>
-    <!-- Versión 3.1 (PWA · modo claro) -->
+    <!-- Versión 3.2 (PWA · modo claro) -->
     <meta name="theme-color" content="#f8fafc">
     <meta name="description" content="Destapa cartas y gana boletas adicionales para la rifa de PrestaYa.">
     <link rel="manifest" href="manifest.json">
@@ -316,7 +316,7 @@
     <div class="flex-1 min-h-[16px]"></div>
 
     <footer class="text-center py-2 text-[10px] text-slate-500">
-        PrestaYa © 2026 • Todos los derechos reservados · v3.1
+        PrestaYa © 2026 • Todos los derechos reservados · v3.2
     </footer>
 
     <script>
@@ -346,12 +346,16 @@
         ];
         let deck = LEGACY_DECK;
 
+        // Íconos disponibles para los premios (en el enlace viaja solo su posición)
+        const ICONS = ['🎟️','🔥','📅','🎁','💎','⭐','💰','🏆','🎉','🍀','💵','🎫','👑','💸','🥇','🎯','✨','❤️','🛍️','☕'];
+        const fixIcon = i => ICONS.includes(i) ? i : '🎁';
+
         function sanitizeCfg(cfg) {
             if (!Array.isArray(cfg)) return null;
             const out = []; let total = 0;
             for (const p of cfg.slice(0, 9)) {
                 const t = String((p && p.t) || '').trim().slice(0, 22);
-                const i = String((p && p.i) || '').trim().slice(0, 8);
+                const i = fixIcon(String((p && p.i) || '').trim());
                 const b = Math.max(0, Math.min(20, parseInt(p && p.b, 10) || 0));
                 let c = Math.max(0, Math.min(9, parseInt(p && p.c, 10) || 0));
                 if (!t) continue;
@@ -400,7 +404,7 @@
             for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
             return a;
         }
-        function randomId() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
+        function randomId() { const A = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; let r = ''; for (let k = 0; k < 4; k++) r += A[Math.floor(Math.random() * A.length)]; return r; }
         function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
         function load(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
         const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -462,8 +466,57 @@
 
         function signPayload(json) { return fnv(json + '|' + LINK_SECRET); }
 
+        // ---------- Enlace corto ----------
+        // Formato:  ?ID.oportunidades.Nombre[.premio.premio...].firma
+        // premio = cartas(0-9) + boletas(base36) + ícono(base36) + nombre
+        const LINK_RE = /^[A-Za-z0-9]{3,8}\.[1-9]\./;
+        function encTxt(s) {
+            return Array.from(String(s).trim().replace(/\s+/g, ' ')).map(ch =>
+                ch === ' ' ? '-' : /[A-Za-z0-9]/.test(ch) ? ch
+                : encodeURIComponent(ch).replace(/[!'()*~_.\-]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+            ).join('');
+        }
+        function decTxt(s) { return decodeURIComponent(s.replace(/-/g, ' ')); }
+        const shortSig = body => fnv(body + '|' + LINK_SECRET).toLowerCase().slice(0, 5);
+        const sameCfg = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+        const autoTitle = n => n === 1 ? '1 Boleta más' : `${n} Boletas más`;   // nombre estándar: no viaja en el enlace
+
+        function buildShortToken(id, name, attempts, cfg) {
+            const parts = [id, String(attempts), encTxt(name)];
+            if (!sameCfg(cfg, DEFAULT_PRIZES)) {
+                cfg.forEach(p => parts.push(String(p.c) + p.b.toString(36) + ICONS.indexOf(fixIcon(p.i)).toString(36) + (p.t === autoTitle(p.b) ? '' : encTxt(p.t))));
+            }
+            const body = parts.join('.');
+            return body + '.' + shortSig(body);
+        }
+        function parseShortToken(q) {
+            const parts = q.split('.');
+            if (parts.length < 4) throw new Error('corto');
+            const sig = parts.pop();
+            if (shortSig(parts.join('.')) !== sig) throw new Error('firma');
+            const [id, a, n, ...pz] = parts;
+            const cfg = pz.length ? pz.map(x => ({
+                c: parseInt(x[0], 10), b: parseInt(x[1], 36), i: ICONS[parseInt(x[2], 36)] || '🎁', t: x.length > 3 ? decTxt(x.slice(3)) : autoTitle(parseInt(x[1], 36))
+            })) : DEFAULT_PRIZES.map(p => ({ ...p }));
+            return { i: id, n: decTxt(n), a: parseInt(a, 10), p: cfg };
+        }
+        function linkQuery() { return location.search.slice(1).split('&')[0]; }
+        function hasClientLink() { const q = linkQuery(); return LINK_RE.test(q) || /(^|&)t=/.test(location.search.slice(1)); }
+
         function readLinkFromUrl() {
-            const t = new URLSearchParams(location.search).get('t');
+            const q = linkQuery();
+            if (LINK_RE.test(q)) {
+                try {
+                    const p = parseShortToken(q);
+                    session = {
+                        id: String(p.i), name: String(p.n || '').slice(0, 40),
+                        attempts: Math.min(MAX_ATTEMPTS, Math.max(1, p.a || 2)),
+                        cfg: sanitizeCfg(p.p), fromLink: true, valid: true
+                    };
+                } catch (e) { session.valid = false; session.fromLink = true; }
+                return;
+            }
+            const t = new URLSearchParams(location.search).get('t');   // enlaces antiguos (v3.1 y anteriores)
             if (!t) return;
             try {
                 const [data, sig] = t.split('.');
@@ -814,7 +867,7 @@
             box.innerHTML = cfgDraft.map((p, idx) => `
                 <div class="bg-white border border-slate-200 rounded-xl p-2">
                     <div class="grid grid-cols-[2.5rem_1fr_3.2rem] gap-1.5">
-                        <input value="${escapeHtml(p.i)}" maxlength="8" oninput="editPrize(${idx},'i',this.value)" class="w-full text-center text-lg bg-slate-50 border border-slate-200 rounded-lg py-1 focus:outline-none focus:border-emerald-500" placeholder="🎁">
+                        <select onchange="editPrize(${idx},'i',this.value)" class="w-full text-center text-lg bg-slate-50 border border-slate-200 rounded-lg py-1 appearance-none focus:outline-none focus:border-emerald-500">${ICONS.map(ic => `<option value="${ic}" ${ic === fixIcon(p.i) ? 'selected' : ''}>${ic}</option>`).join('')}</select>
                         <input value="${escapeHtml(p.t)}" maxlength="22" oninput="editPrize(${idx},'t',this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Nombre del premio">
                         <input value="${p.b}" type="number" min="0" max="20" inputmode="numeric" oninput="editPrize(${idx},'b',this.value)" class="w-full text-center bg-slate-50 border border-slate-200 rounded-lg py-1 text-sm text-slate-900 focus:outline-none focus:border-emerald-500">
                     </div>
@@ -897,7 +950,7 @@
             sfx.win();
         }
 
-        function baseUrl() { return location.origin + location.pathname; }
+        function baseUrl() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
 
         function generateLink() {
             const nameEl = document.getElementById('gen-name');
@@ -905,9 +958,7 @@
             if (!name) { nameEl.focus(); nameEl.classList.add('shake'); setTimeout(() => nameEl.classList.remove('shake'), 400); sfx.error(); return; }
             const phone = document.getElementById('gen-phone').value.replace(/\D/g, '');
             const id = randomId();
-            const json = JSON.stringify({ i: id, n: name, a: genAttempts, p: savedCfg() });
-            const token = b64e(json) + '.' + signPayload(json);
-            const url = baseUrl() + '?t=' + token;
+            const url = baseUrl() + '?' + buildShortToken(id, name, genAttempts, savedCfg());
 
             lastLink = { id, name, phone, attempts: genAttempts, url, date: new Date().toISOString() };
             document.getElementById('gen-id').innerText = id;
@@ -999,7 +1050,7 @@
             showTab('carton', true);
             applyAdminUI();
             // En el celular del administrador, si abre la app sin enlace de cliente, entra directo al Generador
-            if (isAdmin() && !new URLSearchParams(location.search).get('t')) showTab('gen', true);
+            if (isAdmin() && !hasClientLink()) showTab('gen', true);
             renderGame(true);
             // Desbloquear audio con el primer toque (requisito de los navegadores)
             document.addEventListener('pointerdown', () => ac(), { once: true });
