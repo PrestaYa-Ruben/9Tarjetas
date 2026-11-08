@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PrestaYa - Elige tu Carta</title>
-    <!-- Versión 3.2 (PWA · modo claro) -->
+    <!-- Versión 3.3 (PWA · modo claro) -->
     <meta name="theme-color" content="#f8fafc">
     <meta name="description" content="Destapa cartas y gana boletas adicionales para la rifa de PrestaYa.">
     <link rel="manifest" href="manifest.json">
@@ -199,8 +199,8 @@
             <h2 class="text-base font-bold text-slate-900 mb-1">🔗 Generar enlace para cliente</h2>
             <p class="text-[11px] text-slate-500 mb-4">Cada enlace es único: el cliente solo verá el juego con su nombre y sus oportunidades.</p>
 
-            <label class="text-[11px] text-slate-500">Nombre del cliente *</label>
-            <input id="gen-name" type="text" maxlength="40" class="w-full mt-1 mb-3 bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Ej: Carlos Pérez">
+            <label class="text-[11px] text-slate-500">Nombre del cliente (opcional)</label>
+            <input id="gen-name" type="text" maxlength="40" class="w-full mt-1 mb-3 bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Puedes dejarlo vacío">
 
             <label class="text-[11px] text-slate-500">Celular del cliente (opcional)</label>
             <input id="gen-phone" type="tel" inputmode="numeric" maxlength="15" class="w-full mt-1 mb-3 bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-500" placeholder="Ej: 3001234567">
@@ -212,7 +212,11 @@
                 <button onclick="changeGenAttempts(1)" class="w-10 h-10 rounded-xl bg-slate-200 text-lg font-bold">+</button>
             </div>
 
-            <button onclick="generateLink()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-sm">Generar enlace</button>
+            <button onclick="quickSend()" class="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-white py-4 rounded-2xl shadow-lg shadow-emerald-500/30 flex flex-col items-center">
+                <span class="text-base font-black">⚡ Enviar enlace nuevo por WhatsApp</span>
+                <span class="text-[11px] font-semibold text-emerald-50/90">Crea un enlace distinto y abre WhatsApp en un toque</span>
+            </button>
+            <button onclick="generateLink()" class="w-full mt-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-2.5 rounded-xl text-xs">Solo generar enlace (copiar / compartir)</button>
 
             <div id="gen-result" class="hidden mt-4">
                 <div class="bg-white border border-slate-300 rounded-xl p-3">
@@ -296,32 +300,15 @@
         </div>
     </div>
 
-    <!-- Modal PIN -->
-    <div id="pin-modal" class="modal-wrap hidden-modal fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div id="pin-card" class="modal-box bg-white max-w-xs w-full p-6 rounded-3xl border border-slate-300 text-center shadow-2xl">
-            <div class="text-3xl mb-2">🔒</div>
-            <h3 class="text-base font-bold text-slate-900">Acceso administrador</h3>
-            <p class="text-xs text-slate-500 mt-1">Ingresa el PIN</p>
-            <input id="pin-input" type="password" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-                class="w-full mt-4 bg-white border border-slate-300 rounded-xl py-2.5 text-center text-lg font-mono tracking-widest text-slate-900 focus:outline-none focus:border-emerald-500"
-                placeholder="••••••••">
-            <p id="pin-error" class="text-[11px] text-red-500 mt-2 hidden">PIN incorrecto</p>
-            <div class="flex gap-2 mt-4">
-                <button onclick="closePinModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-600 py-2 rounded-xl text-xs font-medium">Cancelar</button>
-                <button onclick="checkPin()" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-xl text-xs font-bold">Entrar</button>
-            </div>
-        </div>
-    </div>
-
     <div class="flex-1 min-h-[16px]"></div>
 
     <footer class="text-center py-2 text-[10px] text-slate-500">
-        PrestaYa © 2026 • Todos los derechos reservados · v3.2
+        PrestaYa © 2026 • Todos los derechos reservados · v3.3
     </footer>
 
     <script>
         // ================= CONFIGURACIÓN =================
-        const ADMIN_PIN   = "prestaya2026";            // PIN de administrador
+        const ADMIN_PIN   = "prestaya2026";            // Clave interna de la marca de administrador (ya no se pide)
         const ADMIN_PHONE = "573162685282";    // WhatsApp que recibe los resultados
         const LINK_SECRET = "PrestaYa-2026-cartas"; // Firma de enlaces (cámbiala si quieres)
         const MAX_ATTEMPTS = 5;
@@ -777,37 +764,19 @@
             if (logoTaps >= 5) { logoTaps = 0; openPinModal(); }
         });
 
-        // El dispositivo del administrador queda recordado (localStorage) hasta tocar "Salir".
-        // La marca depende del PIN: si cambias el PIN, todos los dispositivos deben volver a ingresarlo.
+        // Acceso administrador SIN PIN: 5 toques sobre el logo activan este dispositivo como administrador.
+        // El dispositivo queda recordado (localStorage) hasta tocar "Salir".
         const ADMIN_MARK = () => fnv('admin|' + ADMIN_PIN.toLowerCase() + '|' + LINK_SECRET);
         function isAdmin() { try { return localStorage.getItem('py_admin_device') === ADMIN_MARK(); } catch (e) { return false; } }
 
         function openPinModal() {
-            if (isAdmin()) { applyAdminUI(); return; }
-            const input = document.getElementById('pin-input');
-            input.value = '';
-            document.getElementById('pin-error').classList.add('hidden');
-            openModalEl('pin-modal'); sfx.open();
-            setTimeout(() => input.focus(), 80);
-        }
-        function closePinModal() { closeModalEl('pin-modal'); }
-
-        function checkPin() {
-            const input = document.getElementById('pin-input');
-            if (input.value.trim().toLowerCase() === ADMIN_PIN.toLowerCase()) {
+            if (!isAdmin()) {
                 try { localStorage.setItem('py_admin_device', ADMIN_MARK()); } catch (e) {}
-                closePinModal(); sfx.win();
-                applyAdminUI();
-                showTab('gen', true);
-            } else {
-                const card = document.getElementById('pin-card');
-                document.getElementById('pin-error').classList.remove('hidden');
-                card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake');
-                sfx.error();
-                input.value = ''; input.focus();
+                sfx.win();
             }
+            applyAdminUI();
+            showTab('gen', true);
         }
-        document.getElementById('pin-input').addEventListener('keydown', e => { if (e.key === 'Enter') checkPin(); });
 
         function applyAdminUI() {
             const admin = isAdmin();
@@ -818,7 +787,7 @@
             updateInstallBtn();
         }
         function exitAdmin() {
-            if (!confirm('Este dispositivo dejará de ser administrador. Para volver a ver el Generador tendrás que ingresar el PIN. ¿Continuar?')) return;
+            if (!confirm('Este dispositivo dejará de ser administrador. Para volver, toca 5 veces el logo PRESTAYA. ¿Continuar?')) return;
             try { localStorage.removeItem('py_admin_device'); } catch (e) {}
             sfx.tap(); applyAdminUI();
         }
@@ -955,7 +924,6 @@
         function generateLink() {
             const nameEl = document.getElementById('gen-name');
             const name = nameEl.value.trim();
-            if (!name) { nameEl.focus(); nameEl.classList.add('shake'); setTimeout(() => nameEl.classList.remove('shake'), 400); sfx.error(); return; }
             const phone = document.getElementById('gen-phone').value.replace(/\D/g, '');
             const id = randomId();
             const url = baseUrl() + '?' + buildShortToken(id, name, genAttempts, savedCfg());
@@ -971,10 +939,20 @@
             store('py_gen_history', hist.slice(0, 30));
             renderHistory();
             sfx.win();
+            return lastLink;
+        }
+
+        // Un toque: crea un enlace nuevo, abre WhatsApp y deja el formulario limpio para el siguiente
+        function quickSend() {
+            const l = generateLink();
+            if (!l) return;
+            shareToClient(l);
+            document.getElementById('gen-name').value = '';
+            document.getElementById('gen-phone').value = '';
         }
 
         function clientMessage(l) {
-            return `¡Hola ${l.name}! 🎉 PrestaYa te regala ${l.attempts} ${l.attempts === 1 ? 'oportunidad' : 'oportunidades'} para destapar cartas y ganar boletas adicionales para la rifa. Entra aquí 👉 ${l.url}`;
+            return `¡Hola${l.name ? ' ' + l.name : ''}! 🎉 PrestaYa te regala ${l.attempts} ${l.attempts === 1 ? 'oportunidad' : 'oportunidades'} para destapar cartas y ganar boletas adicionales para la rifa. Entra aquí 👉 ${l.url}`;
         }
 
         async function copyText(text) {
@@ -1016,7 +994,7 @@
                 const fecha = d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) + ' ' + d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
                 return `<div class="flex items-center justify-between bg-slate-100 rounded-lg px-3 py-2">
                     <div class="min-w-0">
-                        <p class="font-bold text-slate-900 truncate">${escapeHtml(h.name)}</p>
+                        <p class="font-bold text-slate-900 truncate">${h.name ? escapeHtml(h.name) : '<span class="text-slate-400 font-semibold">Sin nombre</span>'}</p>
                         <p class="text-[10px] text-slate-500">${h.id} · ${h.attempts} op. · ${fecha}</p>
                     </div>
                     <div class="flex gap-1 shrink-0">
